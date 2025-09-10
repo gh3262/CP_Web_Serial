@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CircuitPython REPL Viewer - Web Serial Connection</title>
+  <style>
+    body {
+      background-color: #f7caf4; /* pale magenta */
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      box-sizing: border-box;
+      font-family: sans-serif;
+    }
+    .header {
+      position: sticky;
+      top: 0;
+      background: #f8d9f3;
+      z-index: 10;
+      padding: 10px 0px 0px 0px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+    .header h3 {
+      text-align: right;
+      margin: 0 10px 0 0;
+    }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 0 10px 10px 10px;
+    }
+    .main-content {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 140px);
+      /* 140px is an estimate for header height, adjust if needed */
+      padding: 0 10px;
+    }
+    .output-window {
+      flex: 1 1 auto;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin: 0 0 10px 0;
+      padding: 10px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "Fira Mono", "Consolas", "Menlo", monospace;
+      font-size: 1em;
+      max-height: 100%;
+      min-height: 200px;
+    }
+    .entered-text {
+      color: green;
+    }
+    .output-text {
+      color: blue;
+    }
+    .error-text {
+      color: red;
+      font-weight: bold;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    #repl-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 6px;
+      font-size: 1em;
+    }
+    .connected-btn {
+      background-color: #4CAF50 !important;
+      color: white !important;
+      border: none;
+    }
+    #send-ctrl-c {
+      background-color: #bbf6f8 !important;
+      font-weight: bold;
+      color: rgba(29, 14, 230, 0.699) !important;
+    }
+    #send-ctrl-d {
+      background-color: #bbf6f8 !important;
+      font-weight: bold;  
+      color: rgba(29, 14, 230, 0.699) !important;
+    }
+    #send-ctrl-b {
+      color: rgba(29, 14, 230, 0.699) !important;
+    }
+    #copy-serial {
+      background-color: rgb(233, 227, 139) !important;
+      color: rgba(5, 92, 20, 0.699) !important;
+    }
+    #paste-repl {
+      background-color: rgb(233, 227, 139) !important;
+      color: rgba(8, 102, 36, 0.699) !important;
+    }
+    #clear-display {
+      color: rgb(136, 73, 0) !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h3>CircuitPython REPL Viewer - Web Serial Connection</h3>
+    <h2 id="device-title">No device connected</h2>
+    <div class="button-row">
+      <button id="connect">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <label for="baudrate">Baud Rate:</label>
+      <select id="baudrate">
+        <option value="9600">9600</option>
+        <option value="19200">19200</option>
+        <option value="38400">38400</option>
+        <option value="57600">57600</option>
+        <option value="115200">115200</option>
+      </select>
+      <button id="send-ctrl-c" disabled>Send Ctrl-C</button>
+      <button id="send-ctrl-d" disabled>Send Ctrl-D</button>
+      <button id="send-ctrl-b" disabled>Send Ctrl-B</button>
+      <button id="copy-serial" disabled>Copy from REPL</button>
+      <button id="paste-repl" disabled>Paste to REPL</button>
+      <button id="clear-display">Clear Display</button>
+    </div>
+  </div>
+  <div class="main-content">
+  <div id="output" class="output-window"></div>
+    <div class="input-row">
+      <input id="repl-input" type="text" placeholder="Type here and press Enter or Send" disabled />
+      <button id="send-repl" disabled>Send</button>
+    </div>
+  </div>
+
+  <script>
+    const connectButton = document.getElementById('connect');
+
+    const output = document.getElementById('output');
+
+    // Helper to append error text in red
+    function appendErrorText(msg) {
+      const errSpan = document.createElement('span');
+      errSpan.className = 'error-text';
+      errSpan.textContent = msg + "\r\n";
+      output.appendChild(errSpan);
+      output.scrollTop = output.scrollHeight;
+    }
+
+  let port = null;
+  let writer = null;
+  const ctrlCButton = document.getElementById('send-ctrl-c');
+  const ctrlDButton = document.getElementById('send-ctrl-d');
+  const copySerialButton = document.getElementById('copy-serial');
+  const pasteReplButton = document.getElementById('paste-repl');
+  const replInput = document.getElementById('repl-input');
+  const sendReplButton = document.getElementById('send-repl');
+  const disconnectButton = document.getElementById('disconnect');
+  const ctrlBButton = document.getElementById('send-ctrl-b');
+  const clearDisplayButton = document.getElementById('clear-display');
+  clearDisplayButton.addEventListener('click', () => {
+    output.innerHTML = '';
+  });
+
+    connectButton.addEventListener('click', async () => {
+  // Always use 115200 as the baud rate when connecting
+  const baudRate = 115200;
+  const baudRateSelect = document.getElementById('baudrate');
+  baudRateSelect.value = '115200';
+  port = await navigator.serial.requestPort();
+  await port.open({ baudRate });
+
+  // Enable send/copy/paste/input buttons
+  ctrlCButton.disabled = false;
+  ctrlDButton.disabled = false;
+  copySerialButton.disabled = false;
+  pasteReplButton.disabled = false;
+  replInput.disabled = false;
+  sendReplButton.disabled = false;
+  ctrlBButton.disabled = false;
+    ctrlBButton.addEventListener('click', async () => {
+      if (writer) {
+        // Ctrl-B is ASCII 2
+        await writer.write(new Uint8Array([2]));
+      }
+    });
+
+  // Change Connect button to green
+  connectButton.classList.add('connected-btn');
+  connectButton.textContent = 'Connected';
+  disconnectButton.disabled = false;
+  connectButton.disabled = true;
+    // Disconnect button logic
+    disconnectButton.addEventListener('click', async () => {
+      if (port) {
+        try {
+          if (writer) {
+            await writer.close();
+            writer = null;
+          }
+          await port.close();
+        } catch (e) {
+          // Ignore errors
+        }
+        port = null;
+      }
+      // Reset UI state
+  ctrlCButton.disabled = true;
+  ctrlDButton.disabled = true;
+  ctrlBButton.disabled = true;
+  copySerialButton.disabled = true;
+  pasteReplButton.disabled = true;
+  replInput.disabled = true;
+  sendReplButton.disabled = true;
+  disconnectButton.disabled = true;
+  connectButton.disabled = false;
+  connectButton.classList.remove('connected-btn');
+  connectButton.textContent = 'Connect';
+  document.getElementById('device-title').textContent = 'No device connected';
+    });
+    // Send input to REPL on button click
+    sendReplButton.addEventListener('click', async () => {
+      if (writer && replInput.value.length > 0) {
+        const entered = document.createElement('span');
+        entered.className = 'entered-text';
+        entered.textContent = replInput.value + "\r\n";
+        output.appendChild(entered);
+        await writer.write(new TextEncoder().encode(replInput.value + "\r"));
+        replInput.value = '';
+        output.scrollTop = output.scrollHeight;
+      }
+    });
+
+    // Send input to REPL on Enter key
+    replInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' && writer && replInput.value.length > 0) {
+        const entered = document.createElement('span');
+        entered.className = 'entered-text';
+        entered.textContent = replInput.value + "\r\n";
+        output.appendChild(entered);
+        await writer.write(new TextEncoder().encode(replInput.value + "\r"));
+        replInput.value = '';
+        output.scrollTop = output.scrollHeight;
+      }
+    });
+
+    pasteReplButton.addEventListener('click', async () => {
+      if (writer) {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            // Write as UTF-8 bytes
+            await writer.write(new TextEncoder().encode(text));
+          }
+        } catch (err) {
+          appendErrorText('Failed to paste: ' + err);
+        }
+      }
+    });
+
+    copySerialButton.addEventListener('click', async () => {
+      const output = document.getElementById('output');
+      try {
+        await navigator.clipboard.writeText(output.textContent);
+      } catch (err) {
+        appendErrorText('Failed to copy: ' + err);
+      }
+    });
+
+      // Update device title with info
+      const deviceTitle = document.getElementById('device-title');
+      if (port.getInfo) {
+        const info = port.getInfo();
+        let portInfo = '';
+        if (info.usbVendorId && info.usbProductId) {
+          portInfo = `USB VID ${info.usbVendorId.toString(16).padStart(4, '0').toUpperCase()} PID ${info.usbProductId.toString(16).padStart(4, '0').toUpperCase()}`;
+        }
+        // Try to show serialNumber or other info if available
+        if (info.serialNumber) {
+          portInfo += (portInfo ? ' ' : '') + `Serial: ${info.serialNumber}`;
+        }
+        if (info.usbProductId && info.usbVendorId && port.getInfo().hasOwnProperty('portId')) {
+          portInfo += (portInfo ? ' ' : '') + `Port: ${info.portId}`;
+        }
+        // Show whatever info is available
+        if (portInfo) {
+          deviceTitle.textContent = `Connected: ${portInfo}`;
+        } else {
+          deviceTitle.textContent = 'Connected: Unknown Device';
+        }
+      } else {
+        deviceTitle.textContent = 'Connected: Device';
+      }
+
+      const decoder = new TextDecoderStream();
+      const readableStreamClosed = port.readable.pipeTo(decoder.writable);
+      const reader = decoder.readable.getReader();
+
+      // Set up writer for sending data
+      writer = port.writable.getWriter();
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) {
+          const outspan = document.createElement('span');
+          outspan.className = 'output-text';
+          outspan.textContent = value;
+          output.appendChild(outspan);
+          output.scrollTop = output.scrollHeight;
+        }
+      }
+    });
+
+    ctrlCButton.addEventListener('click', async () => {
+      if (writer) {
+        // Ctrl-C is ASCII 3
+        await writer.write(new Uint8Array([3]));
+      }
+    });
+
+    ctrlDButton.addEventListener('click', async () => {
+      if (writer) {
+        // Ctrl-D is ASCII 4
+        await writer.write(new Uint8Array([4]));
+      }
+    });
+  </script>
+</body>
+</html>
