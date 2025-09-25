@@ -3,8 +3,16 @@
 <head>
   <title>CircuitPython REPL Viewer - Web Serial Connection</title>
   <style>
+    :root {
+  --primary-bg: #63035c;
+  --header-bg: #f004c8;
+  --accent-color: #4CAF50;
+  --ctrl-button-bg: #bbf6f8;
+  --ctrl-button-color: rgba(29, 14, 230, 0.699);
+}
+
     body {
-      background-color: #f7caf4; /* pale magenta */
+      background-color: var(--primary-bg); /* pale magenta */
       margin: 0;
       padding: 0;
       height: 100vh;
@@ -14,7 +22,7 @@
     .header {
       position: sticky;
       top: 0;
-      background: #f8d9f3;
+      background: var(--header-bg);
       z-index: 10;
       padding: 10px 0px 0px 0px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.04);
@@ -76,22 +84,27 @@
       font-size: 1em;
     }
     .connected-btn {
-      background-color: #4CAF50 !important;
+      background-color: var(--accent-color) !important;
       color: white !important;
       border: none;
     }
+    .ctrl-button {
+  background-color: var(--ctrl-button-bg) !important;
+  font-weight: bold;
+  color: var(--ctrl-button-color) !important;
+}
     #send-ctrl-c {
-      background-color: #bbf6f8 !important;
+      background-color: var(--ctrl-button-bg) !important;
       font-weight: bold;
-      color: rgba(29, 14, 230, 0.699) !important;
+      color: var(--ctrl-button-color) !important;
     }
     #send-ctrl-d {
-      background-color: #bbf6f8 !important;
+      background-color: var(--ctrl-button-bg) !important;
       font-weight: bold;  
-      color: rgba(29, 14, 230, 0.699) !important;
+      color: var(--ctrl-button-color) !important;
     }
     #send-ctrl-b {
-      color: rgba(29, 14, 230, 0.699) !important;
+      color: var(--ctrl-button-color) !important;
     }
     #copy-serial {
       background-color: rgb(233, 227, 139) !important;
@@ -138,9 +151,26 @@
   </div>
 
   <script>
-    const connectButton = document.getElementById('connect');
+    // Cache all DOM elements at startup
+const elements = {
+  connect: document.getElementById('connect'),
+  disconnect: document.getElementById('disconnect'),
+  output: document.getElementById('output'),
+  ctrlC: document.getElementById('send-ctrl-c'),
+  ctrlD: document.getElementById('send-ctrl-d'),
+  ctrlB: document.getElementById('send-ctrl-b'),
+  copySerial: document.getElementById('copy-serial'),
+  pasteRepl: document.getElementById('paste-repl'),
+  replInput: document.getElementById('repl-input'),
+  sendRepl: document.getElementById('send-repl'),
+  clearDisplay: document.getElementById('clear-display'),
+  deviceTitle: document.getElementById('device-title'),
+  baudrate: document.getElementById('baudrate')
+};
 
-    const output = document.getElementById('output');
+    const connectButton = elements.connect;
+
+    const output = elements.output;
 
     // Helper to append error text in red
     function appendErrorText(msg) {
@@ -153,15 +183,15 @@
 
   let port = null;
   let writer = null;
-  const ctrlCButton = document.getElementById('send-ctrl-c');
-  const ctrlDButton = document.getElementById('send-ctrl-d');
-  const copySerialButton = document.getElementById('copy-serial');
-  const pasteReplButton = document.getElementById('paste-repl');
-  const replInput = document.getElementById('repl-input');
-  const sendReplButton = document.getElementById('send-repl');
-  const disconnectButton = document.getElementById('disconnect');
-  const ctrlBButton = document.getElementById('send-ctrl-b');
-  const clearDisplayButton = document.getElementById('clear-display');
+  const ctrlCButton = elements.ctrlC;
+  const ctrlDButton = elements.ctrlD;
+  const copySerialButton = elements.copySerial;
+  const pasteReplButton = elements.pasteRepl;
+  const replInput = elements.replInput;
+  const sendReplButton = elements.sendRepl;
+  const disconnectButton = elements.disconnect;
+  const ctrlBButton = elements.ctrlB;
+  const clearDisplayButton = elements.clearDisplay;
   clearDisplayButton.addEventListener('click', () => {
     output.innerHTML = '';
   });
@@ -169,7 +199,7 @@
     connectButton.addEventListener('click', async () => {
   // Always use 115200 as the baud rate when connecting
   const baudRate = 115200;
-  const baudRateSelect = document.getElementById('baudrate');
+  const baudRateSelect = elements.baudrate;
   baudRateSelect.value = '115200';
   port = await navigator.serial.requestPort();
   await port.open({ baudRate });
@@ -329,6 +359,295 @@
         await writer.write(new Uint8Array([4]));
       }
     });
+
+    // Centralized function to send REPL command
+    async function sendReplCommand() {
+  if (writer && elements.replInput.value.length > 0) {
+    const entered = document.createElement('span');
+    entered.className = 'entered-text';
+    entered.textContent = elements.replInput.value + "\r\n";
+    elements.output.appendChild(entered);
+    await writer.write(new TextEncoder().encode(elements.replInput.value + "\r"));
+    elements.replInput.value = '';
+    elements.output.scrollTop = elements.output.scrollHeight;
+  }
+}
+
+    // Allow Ctrl-D to be used for sending commands as well
+    replInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'D' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        sendReplCommand();
+      }
+    });
+
+    // For testing: auto-fill some example code
+    document.getElementById('repl-input').value = 'print("Hello, CircuitPython!")';
+
+let outputBuffer = [];
+let updateTimer = null;
+
+function batchOutputUpdate(text) {
+  outputBuffer.push(text);
+  
+  if (!updateTimer) {
+    updateTimer = requestAnimationFrame(() => {
+      const fragment = document.createDocumentFragment();
+      outputBuffer.forEach(text => {
+        const span = document.createElement('span');
+        span.className = 'output-text';
+        span.textContent = text;
+        fragment.appendChild(span);
+      });
+      elements.output.appendChild(fragment);
+      elements.output.scrollTop = elements.output.scrollHeight;
+      outputBuffer = [];
+      updateTimer = null;
+    });
+  }
+}
+
+// Initialize app state first
+const appState = {
+  isConnected: false,
+  port: null,
+  writer: null,
+  reader: null
+};
+
+// Set up all event listeners at startup
+function initializeEventListeners() {
+  elements.connect.addEventListener('click', connectDevice);
+  elements.disconnect.addEventListener('click', disconnectDevice);
+  elements.sendRepl.addEventListener('click', sendReplCommand);
+  elements.replInput.addEventListener('keydown', handleReplKeydown);
+  
+  elements.clearDisplay.addEventListener('click', () => {
+    elements.output.innerHTML = '';
+  });
+
+  elements.ctrlC.addEventListener('click', async () => {
+    if (appState.writer) {
+      await appState.writer.write(new Uint8Array([3])); // Ctrl-C
+    }
+  });
+
+  elements.ctrlD.addEventListener('click', async () => {
+    if (appState.writer) {
+      await appState.writer.write(new Uint8Array([4])); // Ctrl-D
+    }
+  });
+
+  elements.ctrlB.addEventListener('click', async () => {
+    if (appState.writer) {
+      await appState.writer.write(new Uint8Array([2])); // Ctrl-B
+    }
+  });
+
+  elements.copySerial.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(elements.output.textContent);
+    } catch (err) {
+      appendErrorText('Failed to copy: ' + err);
+    }
+  });
+
+  elements.pasteRepl.addEventListener('click', async () => {
+    if (appState.writer) {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          await appState.writer.write(new TextEncoder().encode(text));
+        }
+      } catch (err) {
+        appendErrorText('Failed to paste: ' + err);
+      }
+    }
+  });
+}
+
+function updateUIState(connected) {
+  const buttons = [elements.ctrlC, elements.ctrlD, elements.ctrlB, 
+                   elements.copySerial, elements.pasteRepl, elements.sendRepl];
+  
+  buttons.forEach(btn => btn.disabled = !connected);
+  elements.replInput.disabled = !connected;
+  elements.disconnect.disabled = !connected;
+  elements.connect.disabled = connected;
+  
+  if (connected) {
+    elements.connect.classList.add('connected-btn');
+    elements.connect.textContent = 'Connected';
+  } else {
+    elements.connect.classList.remove('connected-btn');
+    elements.connect.textContent = 'Connect';
+    elements.deviceTitle.textContent = 'No device connected';
+  }
+}
+
+async function connectDevice() {
+  try {
+    // If port is already open, close it first
+    if (appState.port) {
+      try {
+        if (appState.writer) {
+          await appState.writer.close();
+          appState.writer = null;
+        }
+        await appState.port.close();
+      } catch (e) {
+        console.log('Error closing existing port:', e);
+      }
+      appState.port = null;
+    }
+
+    // Request new port
+    appState.port = await navigator.serial.requestPort();
+    
+    // Try to open with different configurations if first attempt fails
+    const baudRates = [115200, 9600, 57600, 38400, 19200];
+    let connected = false;
+    
+    for (const baudRate of baudRates) {
+      try {
+        await appState.port.open({ 
+          baudRate: baudRate,
+          dataBits: 8,
+          parity: 'none',
+          stopBits: 1,
+          flowControl: 'none'
+        });
+        
+        appendErrorText(`Connected successfully at ${baudRate} baud`);
+        connected = true;
+        break;
+      } catch (openError) {
+        console.log(`Failed to open at ${baudRate} baud:`, openError);
+        if (baudRate === baudRates[baudRates.length - 1]) {
+          throw openError; // Throw the last error if all attempts fail
+        }
+      }
+    }
+    
+    if (connected) {
+      appState.isConnected = true;
+      updateUIState(true);
+      await startReading();
+    }
+    
+  } catch (error) {
+    appendErrorText(`Connection failed: ${error.message}`);
+    appendErrorText('Troubleshooting tips:');
+    appendErrorText('1. Make sure no other program (Arduino IDE, Thonny, etc.) is using the port');
+    appendErrorText('2. Try unplugging and reconnecting your device');
+    appendErrorText('3. Check if your device is in bootloader mode');
+    appendErrorText('4. Try a different USB cable or port');
+    
+    appState.isConnected = false;
+    appState.port = null;
+    updateUIState(false);
+  }
+}
+
+async function startReading() {
+  try {
+    // Update device title with info
+    const deviceTitle = elements.deviceTitle;
+    if (appState.port.getInfo) {
+      const info = appState.port.getInfo();
+      let portInfo = '';
+      if (info.usbVendorId && info.usbProductId) {
+        portInfo = `USB VID ${info.usbVendorId.toString(16).padStart(4, '0').toUpperCase()} PID ${info.usbProductId.toString(16).padStart(4, '0').toUpperCase()}`;
+      }
+      if (info.serialNumber) {
+        portInfo += (portInfo ? ' ' : '') + `Serial: ${info.serialNumber}`;
+      }
+      deviceTitle.textContent = portInfo ? `Connected: ${portInfo}` : 'Connected: Unknown Device';
+    } else {
+      deviceTitle.textContent = 'Connected: Device';
+    }
+
+    // Set up writer for sending data
+    appState.writer = appState.port.writable.getWriter();
+
+    // Set up reader for receiving data
+    const decoder = new TextDecoderStream();
+    const readableStreamClosed = appState.port.readable.pipeTo(decoder.writable);
+    const reader = decoder.readable.getReader();
+
+    // Read data continuously
+    while (appState.isConnected && appState.port) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) {
+          const outspan = document.createElement('span');
+          outspan.className = 'output-text';
+          outspan.textContent = value;
+          appendToOutput(outspan);
+        }
+      } catch (readError) {
+        console.log('Read error:', readError);
+        break;
+      }
+    }
+    
+    reader.releaseLock();
+  } catch (error) {
+    appendErrorText(`Reading error: ${error.message}`);
+  }
+}
+
+async function disconnectDevice() {
+  appState.isConnected = false;
+  
+  if (appState.port) {
+    try {
+      if (appState.writer) {
+        await appState.writer.close();
+        appState.writer = null;
+      }
+      await appState.port.close();
+    } catch (e) {
+      console.log('Error during disconnect:', e);
+    }
+    appState.port = null;
+  }
+  
+  updateUIState(false);
+}
+
+function appendToOutput(element) {
+  elements.output.appendChild(element);
+  
+  // Limit output to last 1000 elements
+  const children = elements.output.children;
+  if (children.length > 1000) {
+    elements.output.removeChild(children[0]);
+  }
+  
+  elements.output.scrollTop = elements.output.scrollHeight;
+}
+
+async function sendReplCommand() {
+  if (appState.writer && elements.replInput.value.length > 0) {
+    const entered = document.createElement('span');
+    entered.className = 'entered-text';
+    entered.textContent = elements.replInput.value + "\r\n";
+    appendToOutput(entered);
+    await appState.writer.write(new TextEncoder().encode(elements.replInput.value + "\r"));
+    elements.replInput.value = '';
+  }
+}
+
+async function handleReplKeydown(e) {
+  if (e.key === 'Enter') {
+    await sendReplCommand();
+  }
+}
+
+// Initialize event listeners after all functions are defined
+initializeEventListeners();
   </script>
 </body>
 </html>
